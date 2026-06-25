@@ -23,15 +23,17 @@ const UserSchema = new mongoose.Schema({
   password: { type: String, required: true },
   verified: { type: Boolean, default: false },
   verifyToken: { type: String },
-  role: { type: String, default: 'user' }, // user / admin / superadmin
+  role: { type: String, default: 'user' },
   createdAt: { type: Date, default: Date.now }
 });
 
 const User = mongoose.model('User', UserSchema);
 
-// ============ NODEMAILER ============
+// ============ NODEMAILER BREVO ============
 const transporter = nodemailer.createTransport({
-  service: 'gmail',
+  host: process.env.EMAIL_HOST || 'smtp-relay.brevo.com',
+  port: parseInt(process.env.EMAIL_PORT) || 587,
+  secure: false,
   auth: {
     user: process.env.EMAIL_USER,
     pass: process.env.EMAIL_PASS
@@ -68,17 +70,16 @@ app.post('/register', async (req, res) => {
     const user = new User({ username, email, password: hashed, verifyToken });
     await user.save();
 
-    // Envoyer mail de vérification
-    const verifyUrl = `${process.env.BASE_URL || 'http://localhost:3000'}/verify/${verifyToken}`;
+    const verifyUrl = `${process.env.BASE_URL || 'https://amused-creation-production-857a.up.railway.app'}/verify/${verifyToken}`;
     await transporter.sendMail({
-      from: process.env.EMAIL_USER,
+      from: `"Makein Launcher" <${process.env.EMAIL_USER}>`,
       to: email,
       subject: '✅ Makein - Vérification de ton compte',
       html: `
-        <div style="font-family:sans-serif;background:#0f1020;color:#fff;padding:30px;border-radius:10px">
-          <h2 style="color:#a78bfa">Makein Launcher</h2>
+        <div style="font-family:sans-serif;background:#0a0f1e;color:#fff;padding:30px;border-radius:10px;max-width:500px;margin:0 auto">
+          <h2 style="color:#38bdf8">Makein Launcher</h2>
           <p>Salut <b>${username}</b> ! Clique sur le bouton ci-dessous pour vérifier ton compte.</p>
-          <a href="${verifyUrl}" style="display:inline-block;margin-top:16px;background:#7c5af6;color:#fff;padding:12px 24px;border-radius:7px;text-decoration:none;font-weight:600">Vérifier mon compte</a>
+          <a href="${verifyUrl}" style="display:inline-block;margin-top:16px;background:#38bdf8;color:#0a0f1e;padding:12px 24px;border-radius:7px;text-decoration:none;font-weight:700">Vérifier mon compte</a>
           <p style="margin-top:16px;color:rgba(255,255,255,0.4);font-size:12px">Si tu n'as pas créé de compte, ignore ce mail.</p>
         </div>
       `
@@ -99,8 +100,8 @@ app.get('/verify/:token', async (req, res) => {
     user.verifyToken = null;
     await user.save();
     res.send(`
-      <div style="font-family:sans-serif;background:#0f1020;color:#fff;padding:30px;text-align:center">
-        <h2 style="color:#a78bfa">✅ Compte vérifié !</h2>
+      <div style="font-family:sans-serif;background:#0a0f1e;color:#fff;padding:30px;text-align:center;min-height:100vh;display:flex;align-items:center;justify-content:center;flex-direction:column">
+        <h2 style="color:#38bdf8">✅ Compte vérifié !</h2>
         <p>Tu peux maintenant te connecter sur le Makein Launcher.</p>
       </div>
     `);
@@ -132,13 +133,13 @@ app.post('/login', async (req, res) => {
   }
 });
 
-// Profil (route protégée)
+// Profil
 app.get('/me', authMiddleware, async (req, res) => {
   const user = await User.findById(req.user.id).select('-password -verifyToken');
   res.json(user);
 });
 
-// Liste des joueurs (admin)
+// Liste joueurs (admin)
 app.get('/admin/users', authMiddleware, async (req, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'superadmin')
     return res.status(403).json({ error: 'Accès refusé' });
@@ -146,6 +147,5 @@ app.get('/admin/users', authMiddleware, async (req, res) => {
   res.json(users);
 });
 
-// ============ LANCEMENT ============
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`🚀 Serveur Makein lancé sur le port ${PORT}`));
