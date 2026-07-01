@@ -4,8 +4,6 @@ const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const cors = require('cors');
-const nodemailer = require('nodemailer');
-const crypto = require('crypto');
 
 const app = express();
 app.use(express.json());
@@ -19,26 +17,12 @@ mongoose.connect(process.env.MONGODB_URI)
 // ============ MODELE UTILISATEUR ============
 const UserSchema = new mongoose.Schema({
   username: { type: String, required: true, unique: true },
-  email:    { type: String, required: true, unique: true },
   password: { type: String, required: true },
-  verified: { type: Boolean, default: false },
-  verifyToken: { type: String },
   role: { type: String, default: 'user' },
   createdAt: { type: Date, default: Date.now }
 });
 
 const User = mongoose.model('User', UserSchema);
-
-// ============ NODEMAILER BREVO ============
-const transporter = nodemailer.createTransport({
-  host: process.env.EMAIL_HOST || 'smtp-relay.brevo.com',
-  port: parseInt(process.env.EMAIL_PORT) || 587,
-  secure: false,
-  auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS
-  }
-});
 
 // ============ MIDDLEWARE AUTH ============
 function authMiddleware(req, res, next) {
@@ -57,56 +41,21 @@ function authMiddleware(req, res, next) {
 // Inscription
 app.post('/register', async (req, res) => {
   try {
-    const { username, email, password } = req.body;
-    if (!username || !email || !password)
+    const { username, password } = req.body;
+    if (!username || !password)
       return res.status(400).json({ error: 'Champs manquants' });
 
-    const exists = await User.findOne({ $or: [{ email }, { username }] });
-    if (exists) return res.status(400).json({ error: 'Pseudo ou email déjà utilisé' });
+    const exists = await User.findOne({ username });
+    if (exists) return res.status(400).json({ error: 'Pseudo déjà utilisé' });
 
     const hashed = await bcrypt.hash(password, 10);
-    const verifyToken = crypto.randomBytes(32).toString('hex');
 
-    const user = new User({ username, email, password: hashed, verifyToken });
+    const user = new User({ username, password: hashed });
     await user.save();
 
-    const verifyUrl = `${process.env.BASE_URL || 'https://amused-creation-production-857a.up.railway.app'}/verify/${verifyToken}`;
-    await transporter.sendMail({
-      from: `"Makein Launcher" <${process.env.EMAIL_USER}>`,
-      to: email,
-      subject: '✅ Makein - Vérification de ton compte',
-      html: `
-        <div style="font-family:sans-serif;background:#0a0f1e;color:#fff;padding:30px;border-radius:10px;max-width:500px;margin:0 auto">
-          <h2 style="color:#38bdf8">Makein Launcher</h2>
-          <p>Salut <b>${username}</b> ! Clique sur le bouton ci-dessous pour vérifier ton compte.</p>
-          <a href="${verifyUrl}" style="display:inline-block;margin-top:16px;background:#38bdf8;color:#0a0f1e;padding:12px 24px;border-radius:7px;text-decoration:none;font-weight:700">Vérifier mon compte</a>
-          <p style="margin-top:16px;color:rgba(255,255,255,0.4);font-size:12px">Si tu n'as pas créé de compte, ignore ce mail.</p>
-        </div>
-      `
-    });
-
-    res.json({ ok: true, message: 'Compte créé ! Vérifie ton email.' });
+    res.json({ ok: true, message: 'Compte créé ! Tu peux te connecter.' });
   } catch (e) {
     res.status(500).json({ error: e.message });
-  }
-});
-
-// Vérification email
-app.get('/verify/:token', async (req, res) => {
-  try {
-    const user = await User.findOne({ verifyToken: req.params.token });
-    if (!user) return res.status(400).send('Token invalide ou expiré.');
-    user.verified = true;
-    user.verifyToken = null;
-    await user.save();
-    res.send(`
-      <div style="font-family:sans-serif;background:#0a0f1e;color:#fff;padding:30px;text-align:center;min-height:100vh;display:flex;align-items:center;justify-content:center;flex-direction:column">
-        <h2 style="color:#38bdf8">✅ Compte vérifié !</h2>
-        <p>Tu peux maintenant te connecter sur le Makein Launcher.</p>
-      </div>
-    `);
-  } catch (e) {
-    res.status(500).send('Erreur serveur');
   }
 });
 
@@ -116,7 +65,6 @@ app.post('/login', async (req, res) => {
     const { username, password } = req.body;
     const user = await User.findOne({ username });
     if (!user) return res.status(400).json({ error: 'Pseudo ou mot de passe incorrect' });
-    if (!user.verified) return res.status(400).json({ error: 'Vérifie ton email avant de te connecter' });
 
     const valid = await bcrypt.compare(password, user.password);
     if (!valid) return res.status(400).json({ error: 'Pseudo ou mot de passe incorrect' });
@@ -135,15 +83,15 @@ app.post('/login', async (req, res) => {
 
 // Profil
 app.get('/me', authMiddleware, async (req, res) => {
-  const user = await User.findById(req.user.id).select('-password -verifyToken');
+  const user = await User.findById(req.user.id).select('-password');
   res.json(user);
 });
 
 // Liste joueurs (admin)
 app.get('/admin/users', authMiddleware, async (req, res) => {
-  if (req.user.role !== 'admin' && req.user.role !== 'superadmin')
+  if (!['admin', 'superadmin', 'founder'].includes(req.user.role))
     return res.status(403).json({ error: 'Accès refusé' });
-  const users = await User.find().select('-password -verifyToken');
+  const users = await User.find().select('-password');
   res.json(users);
 });
 
